@@ -1,0 +1,237 @@
+def create_html_form(questions):
+
+    html_form = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Online Assessment</title>
+            <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+            <style>
+                body {
+                    background-color: #f4f4f9;
+                }
+                .container {
+                    margin-top: 150px;
+                    padding: 20px;
+                    background: white;
+                    border-radius: 5px;
+                    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+                }
+                h1 {
+                    text-align: center;
+                    margin-bottom: 20px;
+                }
+                .question {
+                    margin-bottom: 60px;
+                }
+                .btn-submit {
+                    width: 100%;
+                    margin-top: 20px;
+                }
+                .scenario, .task {
+                    font-style: italic; /* Make the scenario and task distinct */
+                }
+            </style>
+        </head>
+        <body>
+
+        <div class="container">
+            <h1>Online Assessment</h1>
+            <form id="quiz-form">
+    """
+
+    # Add user ID field
+    html_form += f"<div class='form-group'><label for='user_id'>User ID:</label>\n"
+    html_form += f"<input type='text' class='form-control' id='user_id' name='user_id' required><br>\n</div>"
+
+    # Loop through the questions and infer the type if missing
+    for i, question in enumerate(questions):
+        question_type = question.get('type')
+
+        # Attempt to infer type based on the structure if 'type' is missing
+        if not question_type:
+            if 'options' in question:
+                question_type = 'mcq'
+            elif 'Scenario' in question and 'Task' in question:
+                question_type = 'project'  # Has scenario/task fields, so it's a project type
+            else:
+                question_type = 'subjective'  # Default to subjective
+
+        # Generate HTML form elements based on inferred or actual type
+        if question_type == 'mcq' and 'options' in question:
+            question_text = question.get('question', f"Question {i + 1} not provided")
+            # Generate MCQ
+            html_form += f"<div class='question'><label>Q{i + 1}: {question_text}</label><br>"
+            for option in question['options']:
+                html_form += f"<div class='form-check'><input type='radio' class='form-check-input' name='Q{i + 1}' value='{option}' required> <label class='form-check-label'>{option}</label></div>\n"
+            html_form += "</div>"
+
+        elif question_type == 'project':
+            scenario = question.get('Scenario', 'Scenario not provided')
+            task = question.get('Task', 'Task not provided')
+            html_form += f"<div class='scenario'><label>Q{i + 1}: Scenario: {scenario}</label></div>\n"
+            html_form += f"<div class='task'><label>Task:</label>{task}<br></div>\n"
+            html_form += f"<textarea class='form-control' name='Q{i + 1}' rows='4' placeholder='Your response...' required></textarea><br>\n"
+
+        elif question_type in ['subjective', 'pseudo_code']:
+            question_text = question.get('question', f"Question {i + 1} not provided")
+            html_form += f"<div class='question'><label>Q{i + 1}: {question_text}</label><br>"
+            html_form += f"<textarea class='form-control' name='Q{i + 1}' rows='4' placeholder='Your response...' required></textarea><br>\n"
+
+        else:
+            # Fallback case for unknown types
+            html_form += f"<div class='question'><label>Q{i + 1}: {question_text}</label><br>"
+            html_form += f"<textarea class='form-control' name='Q{i + 1}' rows='4' required></textarea><br>\n"
+
+    # Add proctoring video and timer controls
+    html_form += """    
+        <div class="form-group">
+            <label>Proctoring Video Stream:</label>
+            <video id="camera-stream" width="320" height="240" autoplay muted></video>
+            <p id="microphone-status" class="text-success">Microphone: Active</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-submit" id="submit-button">Submit</button>
+        <p id="timer" class="text-danger">Time left: <span id="time">60</span> seconds</p>
+    </form>
+
+        <div id="success-message" style="display: none;">
+            <h3 class="text-success">You have successfully finished the test, now you can close the window.</h3>
+        </div>
+    </div>
+
+    <script>
+        // JavaScript code for proctoring and auto-submit functionality
+        let mediaRecorder;
+        let recordedChunks = [];
+        let videoStream;
+        let audioStream;
+
+        let timeLeft = 300; // Timer set
+        const timerDisplay = document.getElementById("time");
+        const timerInterval = setInterval(() => {
+            if (timeLeft <= 0) {
+                clearInterval(timerInterval);
+                stopRecording();
+                document.getElementById('quiz-form').submit(); // Auto-submit when time is up
+            } else {
+                timerDisplay.textContent = timeLeft;
+                timeLeft--;
+            }
+        }, 1000);
+
+        function startCamera() {
+            const video = document.getElementById('camera-stream');
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+                    .then(function(stream) {
+                        videoStream = stream;
+                        video.srcObject = stream;
+                        mediaRecorder = new MediaRecorder(stream);
+                        mediaRecorder.ondataavailable = function(event) {
+                            if (event.data.size > 0) {
+                                recordedChunks.push(event.data);
+                            }
+                        };
+                        mediaRecorder.start();
+                    })
+                    .catch(function(error) {
+                        alert("Camera or Microphone access denied.");
+                    });
+            }
+        }
+
+        function startMicrophone() {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(function(stream) {
+                    audioStream = stream;
+                    document.getElementById('microphone-status').textContent = "Microphone: Active";
+                })
+                .catch(function(error) {
+                    alert("Microphone access denied.");
+                });
+        }
+
+        function stopMediaStreams() {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+            }
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+        }
+
+        function handleSubmit(event) {
+            event.preventDefault();
+            stopRecording();
+            stopMediaStreams();
+
+            const formData = new FormData();
+            const answers = [];
+
+            const questions = document.querySelectorAll('.question');
+            questions.forEach((question, index) => {
+                const radioAnswer = question.querySelector('input[type="radio"]:checked');
+                const textAnswer = question.querySelector('textarea');
+                if (radioAnswer) {
+                    answers.push(radioAnswer.value);  // For MCQ
+                } else if (textAnswer) {
+                    answers.push(textAnswer.value);  // For Subjective, Pseudo code, and Project type
+                } else {
+                    answers.push("");  // Empty if no answer given
+                }
+            });
+
+            const userId = document.getElementById('user_id').value;
+            formData.append('user_id', userId);
+            formData.append('answers', JSON.stringify(answers));
+
+            setTimeout(() => {
+                if (recordedChunks.length > 0) {
+                    const recordedBlob = new Blob(recordedChunks, { type: 'video/webm' });
+                    formData.append('video', recordedBlob, 'proctoring_video.webm');
+
+                    fetch('http://127.0.0.1:8000/submission', {
+                        method: 'POST',
+                        body: formData,
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.message === "Submission received successfully") {
+                            document.getElementById('quiz-form').style.display = 'none';
+                            document.getElementById('camera-stream').style.display = 'none';
+                            document.getElementById('success-message').style.display = 'block';
+                        } else {
+                            alert("Submission failed. Please try again.");
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                    });
+                } else {
+                    console.error('Error: No recorded chunks found.');
+                    alert('Submission failed. Please try again.');
+                }
+            }, 1000);
+        }
+
+        window.onload = function() {
+            startCamera();
+            startMicrophone();
+        };
+
+        document.getElementById('quiz-form').addEventListener('submit', handleSubmit);
+    </script>
+
+    </body>
+    </html>"""
+
+    return html_form
