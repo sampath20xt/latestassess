@@ -22,13 +22,18 @@ def allowed_file(filename):
 
 # Save responses to a CSV file
 def save_responses(user_id, answers):
-    answers_list = json.loads(answers)  # Parse JSON string into a Python list
-    file_exists = os.path.isfile("responses.csv")
-    with open("responses.csv", mode='a', newline='') as file:
-        writer = csv.writer(file)
-        if not file_exists:
-            writer.writerow(["User ID", "Answers"])
-        writer.writerow([user_id, answers_list])
+    try:
+        # Attempt to parse answers from JSON string
+        answers_list = json.loads(answers)
+        file_exists = os.path.isfile("responses.csv")
+        # Write the answers to responses.csv
+        with open("responses.csv", mode='a', newline='') as file:
+            writer = csv.writer(file)
+            if not file_exists:
+                writer.writerow(["User ID", "Answers"])
+            writer.writerow([user_id, answers_list])
+    except Exception as e:
+        print(f"Error saving responses: {e}")
 
 @app.route('/submission', methods=['POST'])
 def handle_submission():
@@ -36,25 +41,24 @@ def handle_submission():
         # Get the answers and user ID from the form
         user_id = request.form.get('user_id')
         answers = request.form.get('answers')
+        # DEBUGGING: Print out the received data
+        print(f"Received answers for user_id {user_id}: {answers}")
         if not answers or not user_id:
             return jsonify({"error": "No answers or user ID provided"}), 400
-
         # Get the uploaded video file
         if 'video' not in request.files:
             return jsonify({"error": "No video file provided"}), 400
-
         video = request.files['video']
-
         # Check if the file is valid and allowed
         if video and allowed_file(video.filename):
             video_filename = os.path.join(UPLOAD_FOLDER, f"{user_id}_video.webm")
             video.save(video_filename)  # Save the video to the uploads folder
+            # DEBUGGING: Print the video path
+            print(f"Video saved at: {video_filename}")
         else:
             return jsonify({"error": "Invalid video file"}), 400
-
         # Save the responses with the user ID
         save_responses(user_id, answers)
-
         # Respond with success message
         return jsonify({
             "message": "Submission received successfully",
