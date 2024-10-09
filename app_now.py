@@ -1,6 +1,5 @@
 import ast
 import csv
-import pandas as pd
 import streamlit as st
 from streamlit_option_menu import option_menu
 
@@ -12,10 +11,10 @@ if "questions" not in st.session_state:
 if "topics" not in st.session_state:
     st.session_state['topics'] = []
 
-def save_test_cases_to_csv(test_cases, file_name='testcases.csv'):
-    df = pd.DataFrame(test_cases)
-    df.to_csv(file_name, index=False)
-    print(f"Test cases saved to {file_name}")
+# def save_test_cases_to_csv(test_cases, file_name='testcases.csv'):
+#     df = pd.DataFrame(test_cases)
+#     df.to_csv(file_name, index=False)
+#     print(f"Test cases saved to {file_name}")
 
 def create_html_form(questions):
 
@@ -50,7 +49,7 @@ def create_html_form(questions):
                     margin-top: 20px;
                 }
                 .scenario, .task {
-                    font-style: italic; /* Make the scenario and task distinct */
+                    font-style: italic;
                 }
             </style>
         </head>
@@ -65,49 +64,44 @@ def create_html_form(questions):
     html_form += f"<div class='form-group'><label for='user_id'>User ID:</label>\n"
     html_form += f"<input type='text' class='form-control' id='user_id' name='user_id' required><br>\n</div>"
 
-    # Loop through the questions and infer the type if missing
+    # Loop through the questions and generate the correct form input for each type
     for i, question in enumerate(questions):
-        question_type = question.get('type')
+        question_type = question.get('type', '')
 
-        # Attempt to infer type based on the structure if 'type' is missing
         if not question_type:
             if 'options' in question:
                 question_type = 'mcq'
             elif 'Scenario' in question and 'Task' in question:
-                question_type = 'project'  # Has scenario/task fields, so it's a project type
+                question_type = 'project'
             else:
-                question_type = 'subjective'  # Default to subjective
+                question_type = 'subjective'
 
-        # Generate HTML form elements based on inferred or actual type
+        # Ensure that each question block is assigned the class 'question'
         if question_type == 'mcq' and 'options' in question:
-            question_text = question.get('question', f"Question {i + 1} not provided")
-            # Generate MCQ
+            question_text = question.get('question', f"Question {i + 1}")
             html_form += f"<div class='question'><label>Q{i + 1}: {question_text}</label><br>"
             for option in question['options']:
                 html_form += f"<div class='form-check'><input type='radio' class='form-check-input' name='Q{i + 1}' value='{option}' required> <label class='form-check-label'>{option}</label></div>\n"
             html_form += "</div>"
 
         elif question_type == 'project':
-            print("Project")
             scenario = question.get('Scenario', 'Scenario not provided')
             task = question.get('Task', 'Task not provided')
-            # html_form += f"<div class='question'><label><strong>Q{i + 1}: {question_text}</strong></label><br>
-            html_form += f"<div class='scenario'><label>Question</strong>{i + 1}: Scenario: {scenario} <br>"
-            html_form += f"<div class='task'><label>Task:</strong>{task}<br>"
-            html_form += f"<textarea class='form-control' name='Q{i + 1}' rows='4' placeholder='Your response...' required></textarea><br></div></div>"
+            html_form += f"<div class='question'><div class='scenario'><label>Q{i + 1}: Scenario: {scenario}</label></div>\n"
+            html_form += f"<div class='task'><label>Task:</label>{task}<br></div>\n"
+            html_form += f"<textarea class='form-control' name='Q{i + 1}' rows='4' placeholder='Your response...' required></textarea><br>\n</div>"
 
         elif question_type in ['subjective', 'pseudo_code']:
-            # Generate a text area for subjective or code questions
+            question_text = question.get('question', f"Question {i + 1}")
             html_form += f"<div class='question'><label>Q{i + 1}: {question_text}</label><br>"
-            html_form += f"<textarea class='form-control' name='Q{i + 1}' rows='4' placeholder='Your response...' required></textarea><br></div>"
+            html_form += f"<textarea class='form-control' name='Q{i + 1}' rows='4' placeholder='Your response...' required></textarea><br>\n</div>"
 
         else:
-            # Fallback case for unknown types
             html_form += f"<div class='question'><label>Q{i + 1}: {question_text}</label><br>"
-            html_form += f"<textarea class='form-control' name='Q{i + 1}' rows='4' required></textarea><br></div>"
+            html_form += f"<textarea class='form-control' name='Q{i + 1}' rows='4' required></textarea><br>\n</div>"
 
     # Add proctoring video and timer controls
-    html_form += """    
+    html_form += """
         <div class="form-group">
             <label>Proctoring Video Stream:</label>
             <video id="camera-stream" width="320" height="240" autoplay muted></video>
@@ -118,25 +112,24 @@ def create_html_form(questions):
         <p id="timer" class="text-danger">Time left: <span id="time">60</span> seconds</p>
     </form>
 
-        <div id="success-message" style="display: none;">
-            <h3 class="text-success">You have successfully finished the test, now you can close the window.</h3>
-        </div>
+    <div id="success-message" style="display: none;">
+        <h3 class="text-success">You have successfully finished the test, now you can close the window.</h3>
+    </div>
     </div>
 
     <script>
-        // JavaScript code for proctoring and auto-submit functionality
         let mediaRecorder;
         let recordedChunks = [];
         let videoStream;
         let audioStream;
 
-        let timeLeft = 300; // Timer set
+        let timeLeft = 300;
         const timerDisplay = document.getElementById("time");
         const timerInterval = setInterval(() => {
             if (timeLeft <= 0) {
                 clearInterval(timerInterval);
                 stopRecording();
-                document.getElementById('quiz-form').submit(); // Auto-submit when time is up
+                document.getElementById('quiz-form').submit();
             } else {
                 timerDisplay.textContent = timeLeft;
                 timeLeft--;
@@ -199,16 +192,31 @@ def create_html_form(questions):
             const answers = [];
 
             const questions = document.querySelectorAll('.question');
+
+            // Check if questions are properly selected
+            console.log("Questions found: ", questions.length);
+
             questions.forEach((question, index) => {
-                const selectedAnswer = question.querySelector('input[type="radio"]:checked, textarea');
-                if (selectedAnswer) {
-                    answers.push(selectedAnswer.value);
+                const radioAnswer = question.querySelector('input[type="radio"]:checked');
+                const textAnswer = question.querySelector('textarea');
+                if (radioAnswer) {
+                    console.log(`MCQ Answer for Q${index + 1}: ${radioAnswer.value}`);
+                    answers.push(radioAnswer.value);  // For MCQ
+                } else if (textAnswer) {
+                    console.log(`Text Answer for Q${index + 1}: ${textAnswer.value}`);
+                    answers.push(textAnswer.value);  // For Subjective, Pseudo code, and Project type
+                } else {
+                    console.log(`No Answer found for Q${index + 1}`);
+                    answers.push("");  // Empty if no answer given
                 }
             });
 
             const userId = document.getElementById('user_id').value;
             formData.append('user_id', userId);
             formData.append('answers', JSON.stringify(answers));
+
+            // DEBUGGING: Log the collected answers to the console
+            console.log("Form Data (final): ", JSON.stringify(answers));
 
             setTimeout(() => {
                 if (recordedChunks.length > 0) {
@@ -233,7 +241,6 @@ def create_html_form(questions):
                         console.error('Error:', error);
                     });
                 } else {
-                    console.error('Error: No recorded chunks found.');
                     alert('Submission failed. Please try again.');
                 }
             }, 1000);
@@ -256,12 +263,11 @@ def create_html_form(questions):
 def details():
     title = st.text_input("Title of Assessment", "")
     job_designation = st.text_input("Job Designation", "")
-    experience_range = st.number_input("Experience Range (in years)", min_value=0, step=1)
+    experience_range = st.number_input("Experience Range (in years)", min_value=0, value=1, step=1)
 
     if st.button("Generate Skills"):
         if title and job_designation and experience_range:
             skills_suggestion = generate_skills_and_topics(title, job_designation, experience_range)
-            # st.write(skills_suggestion)
             st.session_state['skills_topics'] = skills_suggestion  # Store suggested skills in session state
             st.success("Generated skills")
         else:
@@ -294,7 +300,7 @@ def assessment():
 
     question_type = st.selectbox("Question Type", ["Subjective", "Pseudo code", "MCQ","Project"])
     difficulty_level = st.selectbox("Difficulty Level", ["Easy", "Medium", "Hard"])
-    num_questions = st.number_input("Number of Questions", min_value=1, step=1)
+    num_questions = st.number_input("Number of Questions", min_value=1, value =1, step=1)
     additional_requirements = st.text_area("Additional Requirements (optional)", "")
     topics = st.session_state['topics']
 
@@ -303,7 +309,7 @@ def assessment():
             questions = generate_questions(topics, question_type, difficulty_level, num_questions,
                                            additional_requirements)
             questions = ast.literal_eval(questions)
-            save_test_cases_to_csv(questions,'testcases.csv')
+            # save_test_cases_to_csv(questions,'testcases.csv')
             st.session_state['questions'] = questions  # Store questions in session state
             st.success("Questions generated successfully!")
 
@@ -349,32 +355,32 @@ def evaluation():
                     # Display each question with the corresponding user answer
                     for i, value in enumerate(opt):
                         question[i]['user_answer'] = value
-                    print(question)
-                    if question[0]['options']:  # For multiple-choice questions
-                        for i, ques in enumerate(question):
-                            st.write(f"**Question {i + 1}:** {ques['question']}")
-                            st.write(f"**User Answer:** {ques['user_answer']}")
-                            st.write(f"**Correct Answer:** {ques['correct_answer']}")
-                            st.write("---")
-                        myscore = sum([1 for x in question if x['user_answer'] == x['correct_answer']])
-                        st.write(f"Your score: {myscore} out of {len(question)}")
+                    if 'options' in question[0]:  # For multiple-choice questions
+                        if question[0]['options']:
+                            for i, ques in enumerate(question):
+                                st.write(f"**Question {i + 1}:** {ques['question']}")
+                                st.write(f"**User Answer:** {ques['user_answer']}")
+                                st.write(f"**Correct Answer:** {ques['correct_answer']}")
+                                st.write("---")
+                            myscore = sum([1 for x in question if x['user_answer'] == x['correct_answer']])
+                            st.write(f"Your score: {myscore} out of {len(question)}")
 
-                    elif question[0]['Scenario']:
-                        questions = [q['question'] for q in question]
-                        print(questions)
-                        answers = [q['user_answer'] for q in question]
-                        print(answers)
+                    elif 'Scenario' in question[0]:
+                        sceranio = [q['Scenario'] for q in question]
+                        task = [q['Task'] for q in question]
                         test_cases = [q['Test Cases'] for q in question]
-                        print(test_cases)
+                        answers = [q['user_answer'] for q in question]
                         if answers:
-                            validation = validate_testCases(questions,answers,test_cases)
+                            validation = validate_testCases(sceranio, task, answers, test_cases)
                             response = ast.literal_eval(validation)
 
                             for i,ques in enumerate(response):
-                                st.write(f"**Question {i + 1}:** {ques['questions']}")
+                                st.write(f"**Question {i + 1}:** {ques['scenario']}")
+                                st.write(f"**Question {i + 1}:** {ques['task']}")
                                 st.write(f"**User Answer:** {ques['user_answers']}")
-                                st.write(f"**Test Cases:** {ques['test_cases']}")
-                                st.write(f"**Answer:** {ques['answer']}")
+                                for i,test_case in enumerate(ques['test_cases']):
+                                    st.write(f"**Test Case - {i + 1}:**{test_case}")
+                                st.write(f"**Evaluation:** {ques['answer']}")
                                 st.write("---")
                             myscore = sum([5 for x in response if x['answer'] == "Passed"])
                             st.write(f"Your score: {myscore} out of {len(response) * 5}")
@@ -383,15 +389,13 @@ def evaluation():
 
                     else:  # For subjective or pseudo code questions
                         questions = [q['question'] for q in question]
-                        print(questions)
                         answers = [q['user_answer'] for q in question]
-                        print(answers)
 
                         if answers:
                             evaluation = evaluate_answers(questions, answers)
+                            print(type(evaluation))
                             st.write("Evaluation Results:")
                             response = ast.literal_eval(evaluation)
-                            print(response)
 
                             for i, ques in enumerate(response):
                                 st.write(f"**Question {i + 1}:** {ques['questions']}")
