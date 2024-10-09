@@ -1,0 +1,113 @@
+import csv
+import ast
+import pandas as pd
+from Model_now import validate_testCases, evaluate_answers  # Import the necessary functions
+
+def evaluation():
+    st.header("Evaluation")
+
+    user_id = st.text_input("Enter User ID")  # User ID input for evaluation
+    found = False
+
+    if st.button("Evaluate"):
+        if user_id:
+            with st.spinner("Processing responses..."):
+                st.write("### Responses")
+
+                # Step 1: Read responses from responses.csv
+                with open('responses.csv', 'r') as csvfile:
+                    reader = csv.reader(csvfile)
+                    response_data = list(reader)
+
+                # Step 2: Search for user responses based on user_id
+                user_answers = None
+                for row in response_data:
+                    if row[0] == str(user_id):
+                        user_answers = ast.literal_eval(row[1])  # Extract user's answers
+                        found = True
+                        break
+                
+                if found:
+                    # Initialize variables to keep track of scores and responses
+                    mcq_score = 0
+                    subjective_score = 0
+                    project_score = 0
+                    total_mcq = 0
+                    total_subjective = 0
+                    total_project = 0
+
+                    # Step 3: Load test cases from testcases.csv for project questions only
+                    test_cases_df = pd.read_csv('testcases.csv')
+                    test_cases = test_cases_df.to_dict(orient='records')  # Convert DataFrame to list of dictionaries
+
+                    # Step 4: Iterate through the user answers and evaluate based on question type
+                    for i, user_answer in enumerate(user_answers):
+                        # Retrieve the question type and other details from responses.csv
+                        question_type = "subjective"  # Assume default is subjective unless otherwise specified
+                        question = f"Question {i + 1}"  # Placeholder for question text from responses.csv
+
+                        # MCQ and Subjective/Pseudo Code will be handled based on user answers from responses.csv
+                        if question_type == 'mcq':
+                            # MCQ Validation
+                            total_mcq += 1
+                            correct_answer = "correct_answer_from_responses.csv"  # Placeholder for correct answer
+                            if user_answer == correct_answer:
+                                st.write(f"**Question {i + 1} (MCQ):** {question}")
+                                st.write(f"**User Answer:** {user_answer}")
+                                st.write(f"**Correct Answer:** {correct_answer}")
+                                st.write(f"Result: Correct")
+                                mcq_score += 1
+                            else:
+                                st.write(f"**Question {i + 1} (MCQ):** {question}")
+                                st.write(f"**User Answer:** {user_answer}")
+                                st.write(f"**Correct Answer:** {correct_answer}")
+                                st.write(f"Result: Incorrect")
+                            st.write("---")
+
+                        elif question_type in ['subjective', 'pseudo_code']:
+                            # Subjective or Pseudo Code Validation using evaluate_answers
+                            total_subjective += 1
+                            questions = [question]
+                            answers = [user_answer]
+                            validation_result = evaluate_answers(questions, answers)
+                            response = ast.literal_eval(validation_result)
+                            st.write(f"**Question {i + 1} (Subjective/Pseudo Code):** {response[0]['questions']}")
+                            st.write(f"**User Answer:** {response[0]['user_answers']}")
+                            st.write(f"**Correct Answer:** {response[0]['correct_answer']}")
+                            st.write(f"Result: {response[0]['evaluation']}")
+                            if response[0]['evaluation'] == 'Correct Answer':
+                                subjective_score += 1
+                            st.write("---")
+
+                        elif question_type == 'project':
+                            # Project type evaluation using testcases.csv
+                            total_project += 1
+                            # Find the corresponding test case for the project question from testcases.csv
+                            project_test_case = next((tc for tc in test_cases if tc['question'] == question), None)
+                            if project_test_case:
+                                project_scenario = project_test_case.get('Scenario', 'Scenario not provided')
+                                project_task = project_test_case.get('Task', 'Task not provided')
+                                project_test_cases = project_test_case.get('test_cases')
+
+                                st.write(f"**Question {i + 1} (Project):**")
+                                st.write(f"**Scenario:** {project_scenario}")
+                                st.write(f"**Task:** {project_task}")
+                                st.write(f"**User Answer:** {user_answer}")
+
+                                # Validate project based on test cases
+                                validation_result = validate_testCases([question], [user_answer], [project_test_cases])
+                                response = ast.literal_eval(validation_result)
+                                st.write(f"**Test Cases:** {response[0]['test_cases']}")
+                                st.write(f"Result: {response[0]['answer']}")
+                                if response[0]['answer'] == 'Passed':
+                                    project_score += 1
+                                st.write("---")
+
+                    # Display total score
+                    total_score = mcq_score + subjective_score + project_score
+                    total_questions = total_mcq + total_subjective + total_project
+                    st.write(f"### Final Score: {total_score} out of {total_questions}")
+                else:
+                    st.warning(f"No responses found for User ID: {user_id}")
+        else:
+            st.warning("Please enter a valid User ID.")
