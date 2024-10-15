@@ -1,0 +1,810 @@
+import ast
+import csv
+import os
+import pyttsx3
+import wave
+import pyaudio
+
+import streamlit as st
+import speech_recognition as sr
+
+from streamlit_option_menu import option_menu
+from Image_Context import image_Context
+from Model_ex import generate_skills_and_topics, get_topics_for_selected_skills, evaluate_answers, generate_questions, \
+    validate_testCases, evaluate_text, paragraphs, evaluate_img_creative, generate_sentence
+
+if "questions" not in st.session_state:
+    st.session_state['questions'] = []
+
+if "topics" not in st.session_state:
+    st.session_state['topics'] = []
+
+def create_html_form(questions):
+
+    html_form = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Online Assessment</title>
+            <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+            <style>
+                body {
+                    background-color: #f4f4f9;
+                }
+                .container {
+                    margin-top: 150px;
+                    padding: 20px;
+                    background: white;
+                    border-radius: 5px;
+                    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+                }
+                h1 {
+                    text-align: center;
+                    margin-bottom: 20px;
+                }
+                .question {
+                    margin-bottom: 60px;
+                }
+                .btn-submit {
+                    width: 100%;
+                    margin-top: 20px;
+                }
+                .scenario, .task {
+                    font-style: italic;
+                }
+            </style>
+        </head>
+        <body>
+
+        <div class="container">
+            <h1>Online Assessment</h1>
+            <form id="quiz-form">
+    """
+
+    # Add user ID field
+    html_form += f"<div class='form-group'><label for='user_id'>User ID:</label>\n"
+    html_form += f"<input type='text' class='form-control' id='user_id' name='user_id' required><br>\n</div>"
+
+    # Loop through the questions and generate the correct form input for each type
+    for i, question in enumerate(questions):
+        question_type = question.get('type', '')
+
+        if not question_type:
+            if 'options' in question:
+                question_type = 'mcq'
+            elif 'Scenario' in question and 'Task' in question:
+                question_type = 'project'
+            else:
+                question_type = 'subjective'
+
+        # Ensure that each question block is assigned the class 'question'
+        if question_type == 'mcq' and 'options' in question:
+            question_text = question.get('question', f"Question {i + 1}")
+            html_form += f"<div class='question'><label>Q{i + 1}: {question_text}</label><br>"
+            for option in question['options']:
+                html_form += f"<div class='form-check'><input type='radio' class='form-check-input' name='Q{i + 1}' value='{option}' required> <label class='form-check-label'>{option}</label></div>\n"
+            html_form += "</div>"
+
+        elif question_type == 'project':
+            scenario = question.get('Scenario', 'Scenario not provided')
+            task = question.get('Task', 'Task not provided')
+            html_form += f"<div class='question'><div class='scenario'><label>Q{i + 1}: Scenario: {scenario}</label></div>\n"
+            html_form += f"<div class='task'><label>Task:</label>{task}<br></div>\n"
+            html_form += f"<textarea class='form-control' name='Q{i + 1}' rows='4' placeholder='Your response...' required></textarea><br>\n</div>"
+
+        elif question_type in ['subjective', 'pseudo_code']:
+            question_text = question.get('question', f"Question {i + 1}")
+            html_form += f"<div class='question'><label>Q{i + 1}: {question_text}</label><br>"
+            html_form += f"<textarea class='form-control' name='Q{i + 1}' rows='4' placeholder='Your response...' required></textarea><br>\n</div>"
+
+        else:
+            html_form += f"<div class='question'><label>Q{i + 1}: {question_text}</label><br>"
+            html_form += f"<textarea class='form-control' name='Q{i + 1}' rows='4' required></textarea><br>\n</div>"
+
+    # Add proctoring video and timer controls
+    html_form += """
+        <div class="form-group">
+            <label>Proctoring Video Stream:</label>
+            <video id="camera-stream" width="320" height="240" autoplay muted></video>
+            <p id="microphone-status" class="text-success">Microphone: Active</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-submit" id="submit-button">Submit</button>
+        <p id="timer" class="text-danger">Time left: <span id="time">60</span> seconds</p>
+    </form>
+
+    <div id="success-message" style="display: none;">
+        <h3 class="text-success">You have successfully finished the test, now you can close the window.</h3>
+    </div>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let recordedChunks = [];
+        let videoStream;
+        let audioStream;
+
+        let timeLeft = 300;
+        const timerDisplay = document.getElementById("time");
+        const timerInterval = setInterval(() => {
+            if (timeLeft <= 0) {
+                clearInterval(timerInterval);
+                stopRecording();
+                document.getElementById('quiz-form').submit();
+            } else {
+                timerDisplay.textContent = timeLeft;
+                timeLeft--;
+            }
+        }, 1000);
+
+        function startCamera() {
+            const video = document.getElementById('camera-stream');
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+                    .then(function(stream) {
+                        videoStream = stream;
+                        video.srcObject = stream;
+                        mediaRecorder = new MediaRecorder(stream);
+                        mediaRecorder.ondataavailable = function(event) {
+                            if (event.data.size > 0) {
+                                recordedChunks.push(event.data);
+                            }
+                        };
+                        mediaRecorder.start();
+                    })
+                    .catch(function(error) {
+                        alert("Camera or Microphone access denied.");
+                    });
+            }
+        }
+
+        function startMicrophone() {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(function(stream) {
+                    audioStream = stream;
+                    document.getElementById('microphone-status').textContent = "Microphone: Active";
+                })
+                .catch(function(error) {
+                    alert("Microphone access denied.");
+                });
+        }
+
+        function stopMediaStreams() {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+            }
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+        }
+
+        function handleSubmit(event) {
+            event.preventDefault();
+            stopRecording();
+            stopMediaStreams();
+
+            const formData = new FormData();
+            const answers = [];
+
+            const questions = document.querySelectorAll('.question');
+
+            // Check if questions are properly selected
+            console.log("Questions found: ", questions.length);
+
+            questions.forEach((question, index) => {
+                const radioAnswer = question.querySelector('input[type="radio"]:checked');
+                const textAnswer = question.querySelector('textarea');
+                if (radioAnswer) {
+                    console.log(`MCQ Answer for Q${index + 1}: ${radioAnswer.value}`);
+                    answers.push(radioAnswer.value);  // For MCQ
+                } else if (textAnswer) {
+                    console.log(`Text Answer for Q${index + 1}: ${textAnswer.value}`);
+                    answers.push(textAnswer.value);  // For Subjective, Pseudo code, and Project type
+                } else {
+                    console.log(`No Answer found for Q${index + 1}`);
+                    answers.push("");  // Empty if no answer given
+                }
+            });
+
+            const userId = document.getElementById('user_id').value;
+            formData.append('user_id', userId);
+            formData.append('answers', JSON.stringify(answers));
+
+            // DEBUGGING: Log the collected answers to the console
+            console.log("Form Data (final): ", JSON.stringify(answers));
+
+            setTimeout(() => {
+                if (recordedChunks.length > 0) {
+                    const recordedBlob = new Blob(recordedChunks, { type: 'video/webm' });
+                    formData.append('video', recordedBlob, 'proctoring_video.webm');
+
+                    fetch('http://127.0.0.1:8000/submission', {
+                        method: 'POST',
+                        body: formData,
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.message === "Submission received successfully") {
+                            document.getElementById('quiz-form').style.display = 'none';
+                            document.getElementById('camera-stream').style.display = 'none';
+                            document.getElementById('success-message').style.display = 'block';
+                        } else {
+                            alert("Submission failed. Please try again.");
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                    });
+                } else {
+                    alert('Submission failed. Please try again.');
+                }
+            }, 1000);
+        }
+
+        window.onload = function() {
+            startCamera();
+            startMicrophone();
+        };
+
+        document.getElementById('quiz-form').addEventListener('submit', handleSubmit);
+    </script>
+
+    </body>
+    </html>"""
+
+    return html_form
+
+
+def details():
+    title = st.text_input("Title of Assessment", "")
+    job_designation = st.text_input("Job Designation", "")
+    experience_range = st.number_input("Experience Range (in years)", min_value=0, value=1, step=1)
+
+    if st.button("Generate Skills"):
+        if title and job_designation and experience_range:
+            skills_suggestion = generate_skills_and_topics(title, job_designation, experience_range)
+            st.session_state['skills_topics'] = skills_suggestion  # Store suggested skills in session state
+            st.success("Generated skills")
+        else:
+            st.warning("Please fill out all fields before proceeding.")
+
+
+def assessment():
+    if 'skills_topics' in st.session_state:
+        skills = [skill['skill'] for skill in st.session_state['skills_topics']]
+        selected_skills = st.multiselect("Select skills you want", skills)
+        if selected_skills:
+            st.write(f"Selected Skills: {', '.join(selected_skills)}")
+        else:
+            st.warning("Please select at least one skill.")
+    else:
+        st.warning("Please go to the previous step and generate skills first.")
+
+    if st.button("Recommended Topic"):
+        if selected_skills:
+            topic_distribution = get_topics_for_selected_skills(selected_skills, st.session_state['skills_topics'])
+            st.session_state['topics'] = topic_distribution
+            st.write(topic_distribution)
+            st.success("Generated Topics")
+        else:
+            st.warning("Please select skills you want")
+
+    else:
+        topic_distribution = get_topics_for_selected_skills(selected_skills, st.session_state['skills_topics'])
+        st.session_state['topics'] = topic_distribution
+
+    question_type = st.selectbox("Question Type", ["Subjective", "Pseudo code", "MCQ","Project"])
+    difficulty_level = st.selectbox("Difficulty Level", ["Easy", "Medium", "Hard"])
+    num_questions = st.number_input("Number of Questions", min_value=1, step=1)
+    additional_requirements = st.text_area("Additional Requirements (optional)", "")
+    topics = st.session_state['topics']
+
+    if st.button("Generate Assessment Questions"):
+        if num_questions > 0 and selected_skills:
+            questions = generate_questions(topics, question_type, difficulty_level, num_questions,
+                                           additional_requirements)
+            questions = ast.literal_eval(questions)
+            # save_test_cases_to_csv(questions,'testcases.csv')
+            st.session_state['questions'] = questions  # Store questions in session state
+            st.success("Questions generated successfully!")
+
+
+def html_form():
+    if 'questions' in st.session_state:
+        questions = st.session_state['questions']
+        html_form = create_html_form(questions)
+        st.download_button(label="Download HTML Form", data=html_form, file_name="assessment_form.html",
+                           mime="text/html")
+    else:
+        st.warning("Please generate the assessment first.")
+
+
+def evaluation():
+    st.header("Evaluation")
+
+    if 'questions' in st.session_state:
+        question = st.session_state['questions']
+
+    user_id = st.text_input("Enter User ID")  # User ID input for evaluation
+    found = False
+
+    if st.button("Evaluate"):
+        if user_id:
+            with st.spinner("Processing responses..."):
+                st.write("### Responses")
+
+                with open('responses.csv', 'r') as csvfile:
+                    reader = csv.reader(csvfile)
+                    data = list(reader)
+
+                # Search for responses with matching user_id
+                for row in data:
+                    if row[0] == str(user_id):
+                        opt = ast.literal_eval(row[1])
+                        while len(opt) < len(question):
+                            opt.append('')  # Ensure all questions are covered
+                        found = True
+                        break
+
+                print(question)
+
+                if found:
+                    # Display each question with the corresponding user answer
+                    for i, value in enumerate(opt):
+                        question[i]['user_answer'] = value
+                    if 'options' in question[0]:  # For multiple-choice questions
+                        if question[0]['options']:
+                            for i, ques in enumerate(question):
+                                st.write(f"**Question {i + 1}:** {ques['question']}")
+                                st.write(f"**User Answer:** {ques['user_answer']}")
+                                st.write(f"**Correct Answer:** {ques['correct_answer']}")
+                                st.write("---")
+                            myscore = sum([1 for x in question if x['user_answer'] == x['correct_answer']])
+                            st.write(f"Your score: {myscore} out of {len(question)}")
+
+                    elif 'Scenario' in question[0]:
+                        sceranio = [q['Scenario'] for q in question]
+                        task = [q['Task'] for q in question]
+                        test_cases = [q['Test Cases'] for q in question]
+                        answers = [q['user_answer'] for q in question]
+                        if answers:
+                            validation = validate_testCases(sceranio, task, answers, test_cases)
+                            response = ast.literal_eval(validation)
+
+                            for i,ques in enumerate(response):
+                                st.write(f"**Question {i + 1}:** {ques['scenario']}")
+                                st.write(f"**Question {i + 1}:** {ques['task']}")
+                                st.write(f"**User Answer:** {ques['user_answers']}")
+                                for i,test_case in enumerate(ques['test_cases']):
+                                    st.write(f"**Test Case - {i + 1}:**{test_case}")
+                                st.write(f"**Evaluation:** {ques['answer']}")
+                                st.write("---")
+                            myscore = sum([5 for x in response if x['answer'] == "Passed"])
+                            st.write(f"Your score: {myscore} out of {len(response) * 5}")
+                        else:
+                            st.warning("Please answer all questions before submitting.")
+
+                    else:  # For subjective or pseudo code questions
+                        print("Subjective")
+                        questions = [q['question'] for q in question]
+                        answers = [q['user_answer'] for q in question]
+
+                        if answers:
+                            evaluation = evaluate_answers(questions, answers)
+                            print(type(evaluation))
+                            st.write("Evaluation Results:")
+                            response = ast.literal_eval(evaluation)
+
+
+                            for i, ques in enumerate(response):
+                                st.write(f"**Question {i + 1}:** {ques['questions']}")
+                                st.write(f"**User Answer:** {ques['user_answers']}")
+                                st.write(f"**Correct Answer:** {ques['correct_answer']}")
+                                st.write(f"**Evaluation:** {ques['evaluation']}")
+                                st.write("---")
+
+                            myscore = sum([5 for x in response if x['evaluation'] == "Correct Answer"])
+                            st.write(f"Your score: {myscore} out of {len(response) * 5}")
+                        else:
+                            st.warning("Please answer all questions before submitting.")
+                else:
+                    st.warning(f"No responses found for User ID: {user_id}")
+
+            video_file = open(f"user_videos/{user_id}_video.webm", "rb")
+            video_bytes = video_file.read()
+
+            DEFAULT_WIDTH = 40
+
+            width = max(DEFAULT_WIDTH, 0.01)
+            side = max((100 - width) / 2, 0.01)
+
+            _, container, _ = st.columns([side, width, side])
+            container.video(data=video_bytes)
+
+        else:
+            st.warning("Please enter a valid User ID.")
+
+def speech_assesment():
+    st.subheader("Speech Evaluation")
+    # Initialize the recognizer
+    r = sr.Recognizer()
+
+    # Parameters for recording in pyaudio
+    chunk = 8192  # Record in chunks of 1024 samples
+    format = pyaudio.paInt16  # 16 bits per sample
+    channels = 1  # Mono
+    rate = 44100  # Record at 44100 samples per second
+    p = pyaudio.PyAudio()
+
+    if 'is_recording' not in st.session_state:
+        st.session_state.is_recording = False  # Default to not recording
+    if 'stream' not in st.session_state:
+        st.session_state.stream = None
+    if 'paragraph' not in st.session_state:
+        st.session_state.paragraph = None
+    if 'terms_accepted' not in st.session_state:
+        st.session_state.terms_accepted = None
+    if 'frames' not in st.session_state:
+        st.session_state.frames = []
+
+    # for getting terms and conditions
+    if st.session_state.terms_accepted is None:
+        with st.form("terms_form"):
+            st.subheader("TERMS AND CONDITIONS")
+            st.write("**By using this application, you agree to the following terms and conditions:**")
+            st.write("**Use headphones and monitor your audio while recording.**")
+            st.write("**Ensure your speech is loud and clear.**")
+            st.write("**Record in a quiet room with no background noise.**")
+            st.write("**Please agree to the terms and conditions to proceed.**")
+            agree_button = st.form_submit_button("Agree")
+            if agree_button:
+                st.session_state.terms_accepted = True
+                st.rerun()
+    # getting paragraph by using the selected topic for reading
+    if st.session_state.terms_accepted is True:
+        if st.session_state.paragraph is None:
+            st.write('Choose Topic for paragraph')
+            choose_topic = st.text_input('Enter Topic:')
+            generate_topic = st.button('Generate')
+            if choose_topic and generate_topic:
+                st.session_state.paragraph = paragraphs(choose_topic)
+                st.rerun()
+        if st.session_state.paragraph:
+            st.write("**Read the following paragraph for evaluating your communication skill**")
+            st.write(st.session_state.paragraph)
+            # For Buttons
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                start = st.button("Start Recording")
+            with col3:
+                stop = st.button("Stop Recording", disabled=st.session_state.is_recording is True)
+            # When Start Recording is pressed
+            if start:
+                st.session_state.is_recording = True
+                with st.spinner('Recording...'):
+                    try:
+                        # it started recording
+                        st.session_state.frames = []
+                        st.session_state.stream = p.open(format=format, channels=channels, rate=rate, input=True,
+                                                         frames_per_buffer=chunk)
+                        st.info("listening...")
+                        while st.session_state.is_recording:
+                            data = st.session_state.stream.read(chunk)
+                            st.session_state.frames.append(data)
+                    except sr.RequestError as e:
+                        st.error(f"Could not request results; {e}")
+                    except sr.UnknownValueError:
+                        st.error("Sorry, I could not understand the audio.")
+            # When Stop Recording is pressed
+            if stop:
+                st.session_state.is_recording = False
+                st.session_state.stream.stop_stream()
+                st.session_state.stream.close()
+                # Save the audio as a .wav file
+                wf = wave.open('output.wav', 'wb')
+                wf.setnchannels(channels)
+                wf.setsampwidth(p.get_sample_size(format))
+                wf.setframerate(rate)
+                wf.writeframes(b''.join(st.session_state.frames))
+                wf.close()
+                audio = 'output.wav'
+                # save the audio file as source
+                with sr.AudioFile(audio) as source:
+                    audio = r.record(source)
+                    try:
+                        if not audio:
+                            raise ValueError("No audio Captured or microphone input failed")
+                        MyText = r.recognize_google(audio)
+                        st.write(MyText)
+                        # Play the Spoken text
+                        st.audio('output.wav')
+
+                        # Evaluate the transcription
+                        evaluation = evaluate_text(st.session_state.paragraph, MyText)
+                        criteria_evaluation, overall_performance = evaluation.split("Overall Performance:")
+                        with st.status("Evaluating communication and professional speaking skills..."):
+                            st.subheader("Evaluation:")
+                            # st.write(evaluation)
+                            st.write(criteria_evaluation)
+                        st.subheader('**Overall Performance:**')
+                        st.write(overall_performance)
+                        st.session_state['evaluation_completed'] = True
+                    except Exception as e:
+                        print(e)
+
+
+def description():
+    st.subheader("Image Description")
+    # Initialize the recognizer
+    r = sr.Recognizer()
+
+    # Parameters for recording in pyaudio
+    chunk = 8192  # Record in chunks of 1024 samples
+    format = pyaudio.paInt16  # 16 bits per sample
+    channels = 1  # Mono
+    rate = 44100  # Record at 44100 samples per second
+    p = pyaudio.PyAudio()
+
+    # Streamlit App
+    st.title("Description of an Image")
+
+    if 'isRecording' not in st.session_state:
+        st.session_state.is_recording = False  # Default to not recording
+    if 'stream' not in st.session_state:
+        st.session_state.stream = None
+    if 'frames' not in st.session_state:
+        st.session_state.frames = []
+
+    base_folder = os.path.join(os.getcwd(), "Images_Description")
+
+    # List all image files in the base folder
+    images = [f for f in os.listdir(base_folder) if f.endswith('.jpg')]
+    images.insert(0, "Select a file")
+
+    # Create a dropdown menu to select an image
+    selected_image = st.selectbox("Select an image file from the Base Folder", images)
+
+    # Display the selected image
+    if selected_image and selected_image != "Select a file":
+        image_path = os.path.join(base_folder, selected_image)
+        st.image(image_path, width=350)
+        st.subheader('Describe about the image')
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            start = st.button("Start Recording")
+        with col3:
+            stop = st.button("Stop Recording", disabled=st.session_state.is_recording is True)
+
+        context = image_Context.get(selected_image)
+        print(context)
+        # When Start Recording is pressed
+        if start:
+            st.session_state.is_recording = True
+            with st.spinner('Recording...'):
+                try:
+                    # it started recording
+                    st.session_state.frames = []
+                    st.session_state.stream = p.open(format=format, channels=channels, rate=rate, input=True,
+                                                     frames_per_buffer=chunk)
+                    st.info("listening...")
+                    while st.session_state.is_recording:
+                        data = st.session_state.stream.read(chunk)
+                        st.session_state.frames.append(data)
+                except sr.RequestError as e:
+                    st.error(f"Could not request results; {e}")
+                except sr.UnknownValueError:
+                    st.error("Sorry, I could not understand the audio.")
+        # When Stop Recording is pressed
+        if stop:
+            st.session_state.is_recording = False
+            st.session_state.stream.stop_stream()
+            st.session_state.stream.close()
+            # Save the audio as a .wav file
+            wf = wave.open('output.wav', 'wb')
+            wf.setnchannels(channels)
+            wf.setsampwidth(p.get_sample_size(format))
+            wf.setframerate(rate)
+            wf.writeframes(b''.join(st.session_state.frames))
+            wf.close()
+            audio = 'output.wav'
+            # save the audio file as source
+            with sr.AudioFile(audio) as source:
+                audio = r.record(source)
+                try:
+                    if not audio:
+                        raise ValueError("No audio Captured or microphone input failed")
+                    MyText = r.recognize_google(audio)
+                    st.write(MyText)
+                    # Play the Spoken text
+                    st.audio('output.wav')
+
+                    # Evaluate the transcription
+                    evaluation = evaluate_img_creative(context, MyText)
+                    print(evaluation)
+                    criteria_evaluation, overall_performance = evaluation.split("Overall Performance:")
+                    with st.status("Evaluating communication and professional speaking skills..."):
+                        st.subheader("Evaluation:")
+                        # st.write(evaluation)
+                        st.write(criteria_evaluation)
+                    st.subheader('**Overall Performance:**')
+                    st.write(overall_performance)
+                    st.session_state['evaluation_completed'] = True
+                except Exception as e:
+                    print(e)
+
+def correct_sentence():
+    r = sr.Recognizer()
+
+    # Parameters for recording in pyaudio
+    chunk = 8192  # Record in chunks of 1024 samples
+    format = pyaudio.paInt16  # 16 bits per sample
+    channels = 1  # Mono
+    rate = 44100  # Record at 44100 samples per second
+    p = pyaudio.PyAudio()
+
+    # Streamlit App
+    st.title("Description of an Image")
+
+    if 'isRecording' not in st.session_state:
+        st.session_state.is_recording = False  # Default to not recording
+    if 'stream' not in st.session_state:
+        st.session_state.stream = None
+    if 'frames' not in st.session_state:
+        st.session_state.frames = []
+
+    if 'incorrect_sentence' not in st.session_state:
+        incorrect_sentence = generate_sentence()
+        incorrect_sentence = ast.literal_eval(incorrect_sentence)
+        print(incorrect_sentence[0])
+        st.session_state['incorrect_sentence'] = incorrect_sentence[0]
+
+        def text_to_speech(command):
+            engine = pyttsx3.init()
+            engine.setProperty('rate', 100)  # Adjust the value for slow rate
+            engine.setProperty('volume', 1.0)  # You can adjust the value for loud volume
+            engine.save_to_file(command, 'audio_file.mp3')
+            engine.runAndWait()
+
+        text_to_speech(incorrect_sentence[0])
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            start = st.button("Start Recording")
+        with col3:
+            stop = st.button("Stop Recording", disabled=st.session_state.is_recording is True)
+
+        if start:
+            st.session_state.is_recording = True
+            with st.spinner('Recording...'):
+                try:
+                    # it started recording
+                    st.session_state.frames = []
+                    st.session_state.stream = p.open(format=format, channels=channels, rate=rate, input=True,
+                                                     frames_per_buffer=chunk)
+                    st.info("listening...")
+                    while st.session_state.is_recording:
+                        data = st.session_state.stream.read(chunk)
+                        st.session_state.frames.append(data)
+                except sr.RequestError as e:
+                    st.error(f"Could not request results; {e}")
+                except sr.UnknownValueError:
+                    st.error("Sorry, I could not understand the audio.")
+        # When Stop Recording is pressed
+        if stop:
+            st.session_state.is_recording = False
+            st.session_state.stream.stop_stream()
+            st.session_state.stream.close()
+            # Save the audio as a .wav file
+            wf = wave.open('output.wav', 'wb')
+            wf.setnchannels(channels)
+            wf.setsampwidth(p.get_sample_size(format))
+            wf.setframerate(rate)
+            wf.writeframes(b''.join(st.session_state.frames))
+            wf.close()
+            audio = 'output.wav'
+            # save the audio file as source
+            with sr.AudioFile(audio) as source:
+                audio = r.record(source)
+                try:
+                    if not audio:
+                        raise ValueError("No audio Captured or microphone input failed")
+                    MyText = r.recognize_google(audio)
+                    st.write(MyText)
+                    # Play the Spoken text
+                    st.audio('output.wav')
+
+                #     # Evaluate the transcription
+                #     evaluation = evaluate_sentence(incorrect_sentence, MyText)
+                #     criteria_evaluation, overall_performance = evaluation.split("Overall Performance:")
+                #     with st.status("Evaluating communication and professional speaking skills..."):
+                #         st.subheader("Evaluation:")
+                #         # st.write(evaluation)
+                #         st.write(criteria_evaluation)
+                #     st.subheader('**Overall Performance:**')
+                #     st.write(overall_performance)
+                #     st.session_state['evaluation_completed'] = True
+                except Exception as e:
+                    print(e)
+
+def communication_skills():
+
+    st.subheader("Communication Skills")
+    if 'current_level' not in st.session_state:
+        st.session_state['current_level'] = 1
+    if 'evaluation_completed' not in st.session_state:
+        st.session_state['evaluation_completed'] = False
+
+    choice = option_menu(None, ["Level 1", "Level 2", "Level 3"],
+                         icons=["mic", "thinking", "pencil"],
+                         menu_icon="cast", default_index=0, orientation="horizontal",
+                         styles={
+                             "container": {"background-color": "#bedff9", "border-radius": "10px,"},
+                             "icon": {"color": "black"},
+                             "nav-link": {"color": "black", "--hover-color": "#7ebbfb", "border-radius": "5px"},
+                             "nav-link-selected": {"background-color": "#68a8ec", "border-radius": "px"},
+                         })
+
+    if choice == "Level 1":
+        speech_assesment()
+        if st.session_state['evaluation_completed']:
+            st.session_state['current_level'] += 1
+            st.session_state['evaluation_completed'] = False
+            # st.experimental_rerun()
+    elif choice == "Level 2":
+        if st.session_state['current_level'] == 2:
+            description()
+            if st.session_state.get('evaluation_completed', False):
+                st.session_state['current_level'] += 1
+                st.session_state['evaluation_completed'] = False
+        else:
+            st.error("Access Denied !!! Please submit the previous Level.")
+    elif choice == "Level 3":
+        if st.session_state['current_level'] == 3:
+            correct_sentence()
+            if st.session_state.get('evaluation_completed', False):
+                st.session_state['current_level'] = 1
+                st.session_state['evaluation_completed'] = False
+        else:
+            st.error("Access Denied !!! Please submit the previous Level.")
+
+
+def main():
+    st.set_page_config(
+        page_title="Assessment Generator",
+        page_icon=":page_with_curl:",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+    choice = option_menu(None, ["Assessment Details & Skills", "Generate Assessment", "Export HTML Form", "Evaluation",
+                                "Communication Skills"],
+                         icons=["briefcase", "pencil", "download", "clipboard", "mic"],
+                         menu_icon="cast", default_index=0, orientation="horizontal",
+                         styles={
+                             "container": {"background-color": "#bedff9", "border-radius": "10px,"},
+                             "icon": {"color": "black"},
+                             "nav-link": {"color": "black", "--hover-color": "#7ebbfb", "border-radius": "5px"},
+                             "nav-link-selected": {"background-color": "#68a8ec", "border-radius": "px"},
+                         })
+
+    if choice == "Assessment Details & Skills":
+        details()
+    elif choice == "Generate Assessment":
+        assessment()
+    elif choice == "Export HTML Form":
+        html_form()
+    elif choice == "Evaluation":
+        evaluation()
+    elif choice == "Communication Skills":
+        communication_skills()
+
+if __name__ == "__main__":
+    main()
