@@ -11,13 +11,23 @@ import speech_recognition as sr
 from streamlit_option_menu import option_menu
 from Image_Context import image_Context
 from Model_ex import generate_skills_and_topics, get_topics_for_selected_skills, evaluate_answers, generate_questions, \
-    validate_testCases, evaluate_text, paragraphs, evaluate_img_creative, generate_sentence
+    validate_testCases, evaluate_text, paragraphs, evaluate_img_creative, generate_sentence, evaluate_sentences
 
 if "questions" not in st.session_state:
     st.session_state['questions'] = []
 
 if "topics" not in st.session_state:
     st.session_state['topics'] = []
+
+# Initialize the recognizer
+r = sr.Recognizer()
+
+# Parameters for recording in pyaudio
+chunk = 8192  # Record in chunks of 1024 samples
+format = pyaudio.paInt16  # 16 bits per sample
+channels = 1  # Mono
+rate = 44100  # Record at 44100 samples per second
+p = pyaudio.PyAudio()
 
 def create_html_form(questions):
 
@@ -312,7 +322,6 @@ def assessment():
             questions = generate_questions(topics, question_type, difficulty_level, num_questions,
                                            additional_requirements)
             questions = ast.literal_eval(questions)
-            # save_test_cases_to_csv(questions,'testcases.csv')
             st.session_state['questions'] = questions  # Store questions in session state
             st.success("Questions generated successfully!")
 
@@ -432,18 +441,59 @@ def evaluation():
         else:
             st.warning("Please enter a valid User ID.")
 
+def handle_recording():
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        start = st.button("Start Recording")
+    with col3:
+        stop = st.button("Stop Recording", disabled=st.session_state.is_recording is True)
+    # When Start Recording is pressed
+    if start:
+        st.session_state.is_recording = True
+        with st.spinner('Recording...'):
+            try:
+                # it started recording
+                st.session_state.frames = []
+                st.session_state.stream = p.open(format=format, channels=channels, rate=rate, input=True,
+                                                 frames_per_buffer=chunk)
+                st.info("listening...")
+                while st.session_state.is_recording:
+                    data = st.session_state.stream.read(chunk)
+                    st.session_state.frames.append(data)
+            except sr.RequestError as e:
+                st.error(f"Could not request results; {e}")
+            except sr.UnknownValueError:
+                st.error("Sorry, I could not understand the audio.")
+    # When Stop Recording is pressed
+    if stop:
+        st.session_state.is_recording = False
+        st.session_state.stream.stop_stream()
+        st.session_state.stream.close()
+        # Save the audio as a .wav file
+        wf = wave.open('output.wav', 'wb')
+        wf.setnchannels(channels)
+        wf.setsampwidth(p.get_sample_size(format))
+        wf.setframerate(rate)
+        wf.writeframes(b''.join(st.session_state.frames))
+        wf.close()
+        audio = 'output.wav'
+        # save the audio file as source
+        with sr.AudioFile(audio) as source:
+            audio = r.record(source)
+            try:
+                if not audio:
+                    raise ValueError("No audio Captured or microphone input failed")
+                MyText = r.recognize_google(audio)
+                st.write(MyText)
+                # Play the Spoken text
+                st.audio('output.wav')
+                return MyText  # Return the transcribed text for further evaluation
+            except Exception as e:
+                st.error(f"Error during transcription: {e}")
+            return None
+
+
 def speech_assesment():
-    st.subheader("Speech Evaluation")
-    # Initialize the recognizer
-    r = sr.Recognizer()
-
-    # Parameters for recording in pyaudio
-    chunk = 8192  # Record in chunks of 1024 samples
-    format = pyaudio.paInt16  # 16 bits per sample
-    channels = 1  # Mono
-    rate = 44100  # Record at 44100 samples per second
-    p = pyaudio.PyAudio()
-
     if 'is_recording' not in st.session_state:
         st.session_state.is_recording = False  # Default to not recording
     if 'stream' not in st.session_state:
@@ -455,6 +505,7 @@ def speech_assesment():
     if 'frames' not in st.session_state:
         st.session_state.frames = []
 
+    st.subheader("Speech Evaluation")
     # for getting terms and conditions
     if st.session_state.terms_accepted is None:
         with st.form("terms_form"):
@@ -481,88 +532,27 @@ def speech_assesment():
             st.write("**Read the following paragraph for evaluating your communication skill**")
             st.write(st.session_state.paragraph)
             # For Buttons
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                start = st.button("Start Recording")
-            with col3:
-                stop = st.button("Stop Recording", disabled=st.session_state.is_recording is True)
-            # When Start Recording is pressed
-            if start:
-                st.session_state.is_recording = True
-                with st.spinner('Recording...'):
-                    try:
-                        # it started recording
-                        st.session_state.frames = []
-                        st.session_state.stream = p.open(format=format, channels=channels, rate=rate, input=True,
-                                                         frames_per_buffer=chunk)
-                        st.info("listening...")
-                        while st.session_state.is_recording:
-                            data = st.session_state.stream.read(chunk)
-                            st.session_state.frames.append(data)
-                    except sr.RequestError as e:
-                        st.error(f"Could not request results; {e}")
-                    except sr.UnknownValueError:
-                        st.error("Sorry, I could not understand the audio.")
-            # When Stop Recording is pressed
-            if stop:
-                st.session_state.is_recording = False
-                st.session_state.stream.stop_stream()
-                st.session_state.stream.close()
-                # Save the audio as a .wav file
-                wf = wave.open('output.wav', 'wb')
-                wf.setnchannels(channels)
-                wf.setsampwidth(p.get_sample_size(format))
-                wf.setframerate(rate)
-                wf.writeframes(b''.join(st.session_state.frames))
-                wf.close()
-                audio = 'output.wav'
-                # save the audio file as source
-                with sr.AudioFile(audio) as source:
-                    audio = r.record(source)
-                    try:
-                        if not audio:
-                            raise ValueError("No audio Captured or microphone input failed")
-                        MyText = r.recognize_google(audio)
-                        st.write(MyText)
-                        # Play the Spoken text
-                        st.audio('output.wav')
-
-                        # Evaluate the transcription
-                        evaluation = evaluate_text(st.session_state.paragraph, MyText)
-                        criteria_evaluation, overall_performance = evaluation.split("Overall Performance:")
-                        with st.status("Evaluating communication and professional speaking skills..."):
-                            st.subheader("Evaluation:")
-                            # st.write(evaluation)
-                            st.write(criteria_evaluation)
-                        st.subheader('**Overall Performance:**')
-                        st.write(overall_performance)
-                        st.session_state['evaluation_completed'] = True
-                    except Exception as e:
-                        print(e)
+            MyText = handle_recording()
+            # Evaluate the transcription
+            evaluation = evaluate_text(st.session_state.paragraph, MyText)
+            criteria_evaluation, overall_performance = evaluation.split("Overall Performance:")
+            with st.status("Evaluating communication and professional speaking skills..."):
+                st.subheader("Evaluation:")
+                # st.write(evaluation)
+                st.write(criteria_evaluation)
+            st.subheader('**Overall Performance:**')
+            st.write(overall_performance)
+            st.session_state['evaluation_completed'] = True
 
 
 def description():
-    st.subheader("Image Description")
-    # Initialize the recognizer
-    r = sr.Recognizer()
-
-    # Parameters for recording in pyaudio
-    chunk = 8192  # Record in chunks of 1024 samples
-    format = pyaudio.paInt16  # 16 bits per sample
-    channels = 1  # Mono
-    rate = 44100  # Record at 44100 samples per second
-    p = pyaudio.PyAudio()
-
-    # Streamlit App
-    st.title("Description of an Image")
-
-    if 'isRecording' not in st.session_state:
+    if 'is_recording' not in st.session_state:
         st.session_state.is_recording = False  # Default to not recording
     if 'stream' not in st.session_state:
         st.session_state.stream = None
     if 'frames' not in st.session_state:
         st.session_state.frames = []
-
+    st.subheader("Image Description")
     base_folder = os.path.join(os.getcwd(), "Images_Description")
 
     # List all image files in the base folder
@@ -577,84 +567,24 @@ def description():
         image_path = os.path.join(base_folder, selected_image)
         st.image(image_path, width=350)
         st.subheader('Describe about the image')
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            start = st.button("Start Recording")
-        with col3:
-            stop = st.button("Stop Recording", disabled=st.session_state.is_recording is True)
-
         context = image_Context.get(selected_image)
         print(context)
-        # When Start Recording is pressed
-        if start:
-            st.session_state.is_recording = True
-            with st.spinner('Recording...'):
-                try:
-                    # it started recording
-                    st.session_state.frames = []
-                    st.session_state.stream = p.open(format=format, channels=channels, rate=rate, input=True,
-                                                     frames_per_buffer=chunk)
-                    st.info("listening...")
-                    while st.session_state.is_recording:
-                        data = st.session_state.stream.read(chunk)
-                        st.session_state.frames.append(data)
-                except sr.RequestError as e:
-                    st.error(f"Could not request results; {e}")
-                except sr.UnknownValueError:
-                    st.error("Sorry, I could not understand the audio.")
-        # When Stop Recording is pressed
-        if stop:
-            st.session_state.is_recording = False
-            st.session_state.stream.stop_stream()
-            st.session_state.stream.close()
-            # Save the audio as a .wav file
-            wf = wave.open('output.wav', 'wb')
-            wf.setnchannels(channels)
-            wf.setsampwidth(p.get_sample_size(format))
-            wf.setframerate(rate)
-            wf.writeframes(b''.join(st.session_state.frames))
-            wf.close()
-            audio = 'output.wav'
-            # save the audio file as source
-            with sr.AudioFile(audio) as source:
-                audio = r.record(source)
-                try:
-                    if not audio:
-                        raise ValueError("No audio Captured or microphone input failed")
-                    MyText = r.recognize_google(audio)
-                    st.write(MyText)
-                    # Play the Spoken text
-                    st.audio('output.wav')
-
-                    # Evaluate the transcription
-                    evaluation = evaluate_img_creative(context, MyText)
-                    print(evaluation)
-                    criteria_evaluation, overall_performance = evaluation.split("Overall Performance:")
-                    with st.status("Evaluating communication and professional speaking skills..."):
-                        st.subheader("Evaluation:")
-                        # st.write(evaluation)
-                        st.write(criteria_evaluation)
-                    st.subheader('**Overall Performance:**')
-                    st.write(overall_performance)
-                    st.session_state['evaluation_completed'] = True
-                except Exception as e:
-                    print(e)
+        MyText = handle_recording()
+        # Evaluate the transcription
+        evaluation = evaluate_img_creative(context, MyText)
+        print(evaluation)
+        criteria_evaluation, overall_performance = evaluation.split("Overall Performance:")
+        with st.status("Evaluating communication and professional speaking skills..."):
+            st.subheader("Evaluation:")
+            # st.write(evaluation)
+            st.write(criteria_evaluation)
+        st.subheader('**Overall Performance:**')
+        st.write(overall_performance)
+        st.session_state['evaluation_completed'] = True
 
 def correct_sentence():
-    r = sr.Recognizer()
 
-    # Parameters for recording in pyaudio
-    chunk = 8192  # Record in chunks of 1024 samples
-    format = pyaudio.paInt16  # 16 bits per sample
-    channels = 1  # Mono
-    rate = 44100  # Record at 44100 samples per second
-    p = pyaudio.PyAudio()
-
-    # Streamlit App
-    st.title("Description of an Image")
-
-    if 'isRecording' not in st.session_state:
+    if 'is_recording' not in st.session_state:
         st.session_state.is_recording = False  # Default to not recording
     if 'stream' not in st.session_state:
         st.session_state.stream = None
@@ -667,73 +597,66 @@ def correct_sentence():
         print(incorrect_sentence[0])
         st.session_state['incorrect_sentence'] = incorrect_sentence[0]
 
-        def text_to_speech(command):
-            engine = pyttsx3.init()
-            engine.setProperty('rate', 100)  # Adjust the value for slow rate
-            engine.setProperty('volume', 1.0)  # You can adjust the value for loud volume
-            engine.save_to_file(command, 'audio_file.mp3')
-            engine.runAndWait()
+    def text_to_speech(command):
+        engine = pyttsx3.init()
+        engine.setProperty('rate', 100)  # Adjust the value for slow rate
+        engine.setProperty('volume', 1.0)  # You can adjust the value for loud volume
+        engine.save_to_file(command, 'audio_file.mp3')
+        engine.runAndWait()
 
-        text_to_speech(incorrect_sentence[0])
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            start = st.button("Start Recording")
-        with col3:
-            stop = st.button("Stop Recording", disabled=st.session_state.is_recording is True)
-
-        if start:
-            st.session_state.is_recording = True
-            with st.spinner('Recording...'):
-                try:
-                    # it started recording
-                    st.session_state.frames = []
-                    st.session_state.stream = p.open(format=format, channels=channels, rate=rate, input=True,
-                                                     frames_per_buffer=chunk)
-                    st.info("listening...")
-                    while st.session_state.is_recording:
-                        data = st.session_state.stream.read(chunk)
-                        st.session_state.frames.append(data)
-                except sr.RequestError as e:
-                    st.error(f"Could not request results; {e}")
-                except sr.UnknownValueError:
-                    st.error("Sorry, I could not understand the audio.")
-        # When Stop Recording is pressed
-        if stop:
-            st.session_state.is_recording = False
-            st.session_state.stream.stop_stream()
-            st.session_state.stream.close()
-            # Save the audio as a .wav file
-            wf = wave.open('output.wav', 'wb')
-            wf.setnchannels(channels)
-            wf.setsampwidth(p.get_sample_size(format))
-            wf.setframerate(rate)
-            wf.writeframes(b''.join(st.session_state.frames))
-            wf.close()
-            audio = 'output.wav'
-            # save the audio file as source
-            with sr.AudioFile(audio) as source:
-                audio = r.record(source)
-                try:
-                    if not audio:
-                        raise ValueError("No audio Captured or microphone input failed")
-                    MyText = r.recognize_google(audio)
-                    st.write(MyText)
-                    # Play the Spoken text
-                    st.audio('output.wav')
-
-                #     # Evaluate the transcription
-                #     evaluation = evaluate_sentence(incorrect_sentence, MyText)
-                #     criteria_evaluation, overall_performance = evaluation.split("Overall Performance:")
-                #     with st.status("Evaluating communication and professional speaking skills..."):
-                #         st.subheader("Evaluation:")
-                #         # st.write(evaluation)
-                #         st.write(criteria_evaluation)
-                #     st.subheader('**Overall Performance:**')
-                #     st.write(overall_performance)
-                #     st.session_state['evaluation_completed'] = True
-                except Exception as e:
-                    print(e)
+    text_to_speech(st.session_state['incorrect_sentence'])
+    st.audio('audio_file.mp3')
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        start = st.button("Start Recording")
+    with col3:
+        stop = st.button("Stop Recording", disabled=st.session_state.is_recording is True)
+    # When Start Recording is pressed
+    if start:
+        st.session_state.is_recording = True
+        with st.spinner('Recording...'):
+            try:
+                # it started recording
+                st.session_state.frames = []
+                st.session_state.stream = p.open(format=format, channels=channels, rate=rate, input=True,
+                                                 frames_per_buffer=chunk)
+                st.info("listening...")
+                while st.session_state.is_recording:
+                    data = st.session_state.stream.read(chunk)
+                    st.session_state.frames.append(data)
+            except sr.RequestError as e:
+                st.error(f"Could not request results; {e}")
+            except sr.UnknownValueError:
+                st.error("Sorry, I could not understand the audio.")
+    # When Stop Recording is pressed
+    if stop:
+        st.session_state.is_recording = False
+        st.session_state.stream.stop_stream()
+        st.session_state.stream.close()
+        # Save the audio as a .wav file
+        wf = wave.open('output.wav', 'wb')
+        wf.setnchannels(channels)
+        wf.setsampwidth(p.get_sample_size(format))
+        wf.setframerate(rate)
+        wf.writeframes(b''.join(st.session_state.frames))
+        wf.close()
+        audio = 'output.wav'
+        # save the audio file as source
+        with sr.AudioFile(audio) as source:
+            audio = r.record(source)
+            try:
+                if not audio:
+                    raise ValueError("No audio Captured or microphone input failed")
+                MyText = r.recognize_google(audio)
+                st.write(MyText)
+                # Play the Spoken text
+                st.audio('output.wav')
+                evaluation = evaluate_sentences(st.session_state.incorrect_sentence, MyText)
+                print(evaluation)
+                st.success(evaluation)
+            except Exception as e:
+                print(e)
 
 def communication_skills():
 
@@ -771,7 +694,7 @@ def communication_skills():
         if st.session_state['current_level'] == 3:
             correct_sentence()
             if st.session_state.get('evaluation_completed', False):
-                st.session_state['current_level'] = 1
+                st.session_state['current_level'] = 2
                 st.session_state['evaluation_completed'] = False
         else:
             st.error("Access Denied !!! Please submit the previous Level.")
