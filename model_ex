@@ -443,7 +443,8 @@ def generate_sentence():
     Do not use any string literals, commas, or apostrophes in the sentences. 
     Do not include spelling mistakes unless the word choice is the main error in the sentence.
     The sentences should be about common, everyday topics or scenarios, making them relatable and easier for users to understand.
-    The output should be in the format of Python list , without including any additional text or explanations.
+    ["sentence1","sentence2","sentence3"]
+    The output should be just the list of sentences as above mentioned format.Don't wrap any other text to the output.
     """
     generation_config = {
         "max_output_tokens": 8192,
@@ -460,4 +461,41 @@ def generate_sentence():
     response = generative_multimodal_model.generate_content(prompt, generation_config=generation_config,
                                                             safety_settings=safety_settings)
     print(response.text)
-    return response.text.strip()
+    return response.text
+
+
+def evaluate_sentences(incorrect_sentence, corrected_sentence):
+    prompt = f"""
+    You are an expert evaluator in communication skills. 
+    your well trained on different  grammatical sentence 
+    incorrect_sentence: {incorrect_sentence}
+    corrected_sentences: {corrected_sentence}
+    you have to just evaluate the corrected sentence comparing with incorrect sentences
+    you have to check the corrected sentences is fully corrected or not in all the aspects of the testing communication
+    you have to  just  whether the sentence is correct or not 
+    you have to analysis what is incorrectly presented in that incorrect_sentence 
+    you have to check whether the incorrectly presented things are removed in corrected_sentences
+
+    if the grammatical part is correct make it correct 
+    if the grammatical part is incorrect make it incorrect 
+    only focus on evaluating the grammar part but not the capital words and small words
+    you have just give only one word text whether it is correct or incorrect
+    avoid giving analysis along side of correct and incorrect 
+
+      """
+    generation_config = {
+        "max_output_tokens": 8192,
+        "temperature": 0.7,
+        "top_p": 0.95,
+    }
+
+    safety_settings = {
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+    }
+
+    response = generative_multimodal_model.generate_content(prompt, generation_config=generation_config,
+                                                            safety_settings=safety_settings)
+    return response.text
