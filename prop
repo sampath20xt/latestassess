@@ -1,0 +1,157 @@
+import ast
+import wave
+import streamlit as st
+import pyttsx3
+import os
+import time
+import speech_recognition as sr
+import pyaudio
+from Model_ex import generate_sentence
+from streamlit_option_menu import option_menu
+# Initialize the recognizer
+r = sr.Recognizer()
+# Parameters for recording in pyaudio
+chunk = 8192  # Record in chunks of 1024 samples
+format = pyaudio.paInt16  # 16 bits per sample
+channels = 1  # Mono
+rate = 44100  # Record at 44100 samples per second
+p = pyaudio.PyAudio()
+def correct_sentence():
+    if 'is_recording' not in st.session_state:
+        st.session_state.is_recording = False
+    if 'stream' not in st.session_state:
+        st.session_state.stream = None
+    if 'frames' not in st.session_state:
+        st.session_state.frames = []
+    if 'current_sentence' not in st.session_state:
+        st.session_state.current_sentence = 0
+    if 'audio_files' not in st.session_state:
+        st.session_state.audio_files = []
+    if 'sentence' not in st.session_state:
+        sentences = generate_sentence()
+        st.session_state.sentence = eval(sentences)
+        
+    def text_to_speech(command,audio_file):
+            engine = pyttsx3.init()
+            engine.setProperty('rate', 100)  # Adjust the rate if needed
+            engine.setProperty('volume', 1.0)  # Adjust volume as needed
+            engine.save_to_file(command, filename=audio_file)
+            engine.runAndWait()
+
+    def get_current_sentence():
+        if st.session_state['current_sentence'] < len(st.session_state.sentence):
+            return st.session_state.sentence[st.session_state.current_sentence]['incorrect_sentence']
+        else:
+            return "Completed"
+
+    cur_incorrect_sen = get_current_sentence()
+
+    if cur_incorrect_sen != "Completed":
+        # Play the incorrect sentence as audio
+        
+        audio_file = f'audio_{st.session_state.current_sentence}_{int(time.time())}.mp3'
+        text_to_speech(cur_incorrect_sen,audio_file)
+        st.session_state['audio'] = audio_file
+        with open(audio_file, "rb") as audio:
+            st.audio(audio.read(), format="audio/mp3")
+
+        # Columns for Start and Stop buttons
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            start = st.button("Start Recording")
+        with col3:
+            stop = st.button("Stop Recording", disabled=st.session_state.is_recording is True)
+        # When Start Recording is pressed
+        if start:
+            st.session_state.is_recording = True
+            with st.spinner('Recording...'):
+                try:
+                    # it started recording
+                    st.session_state.frames = []
+                    st.session_state.stream = p.open(format=format, channels=channels, rate=rate, input=True,
+                                                     frames_per_buffer=chunk)
+                    st.info("listening...")
+                    while st.session_state.is_recording:
+                        data = st.session_state.stream.read(chunk)
+                        st.session_state.frames.append(data)
+                except sr.RequestError as e:
+                    st.error(f"Could not request results; {e}")
+                except sr.UnknownValueError:
+                    st.error("Sorry, I could not understand the audio.")
+        # When Stop Recording is pressed
+        if stop:
+            st.session_state.is_recording = False
+            st.session_state.stream.stop_stream()
+            st.session_state.stream.close()
+            # Save the audio as a .wav file
+            wf = wave.open('output.wav', 'wb')
+            wf.setnchannels(channels)
+            wf.setsampwidth(p.get_sample_size(format))
+            wf.setframerate(rate)
+            wf.writeframes(b''.join(st.session_state.frames))
+            wf.close()
+            audio = 'output.wav'
+            # save the audio file as source
+            with sr.AudioFile(audio) as source:
+                audio = r.record(source)
+                try:
+                    if not audio:
+                        raise ValueError("No audio captured or microphone input failed")
+                    MyText = r.recognize_google(audio)
+                    st.write(f"Your Answer: {MyText}")
+                    with open('output.wav', 'rb') as audio_play:
+                        st.audio(audio_play.read(), format='audio/wav')
+
+
+
+                    if MyText.lower() == st.session_state['sentence'][st.session_state['current_sentence']]['correct_sentence'].lower():
+                        st.success("Correct Answer! :tada: You have earned 10 marks.")
+                        st.write(f"**Correct Sentence:** {MyText}")
+                        st.write("Marks: 10/10")
+
+                        if st.button("Next Question"):
+                            if st.session_state.current_sentence + 1 < len(st.session_state.sentence):
+                                st.session_state.current_sentence += 1
+                                if 'audio' in st.session_state:
+                                    del st.session_state['audio']
+
+                                st.experimental_rerun()
+
+                    else:
+                        st.error("Incorrect Answer. You scored 0 marks. Please try again.")
+                        # st.write(f"**Expected Correct Sentence:** {st.session_state['incorrect_sentence']}")
+                        st.write("Marks: 0/10")
+                        if st.button("Try Again"):
+                            st.experimental_rerun()
+                except Exception as e:
+                    st.error(f"Error during transcription: {e}")
+    else:
+        st.success("You have Completed all Sentence")
+def dummy():
+    if 'current_sentence' not in st.session_state:
+        st.session_state['current_sentence'] = 0
+    if 'next_question' not in st.session_state:
+        st.session_state.next_question = False
+    if 'sentence' not in st.session_state:
+        incorrect_sentence = generate_sentence()
+        incorrect_sentence = ast.literal_eval(incorrect_sentence)
+        st.session_state['sentence'] = incorrect_sentence
+    correct_sentence()
+def main():
+    st.subheader("Communication Skills")
+    if 'current_level' not in st.session_state:
+        st.session_state['current_level'] = 1
+    if 'evaluation_completed' not in st.session_state:
+        st.session_state['evaluation_completed'] = False
+    choice = option_menu(None, ["Level 1", "Level 2", "Level 3"],
+                         icons=["mic", "thinking", "pencil"],
+                         menu_icon="cast", default_index=0, orientation="horizontal",
+                         styles={
+                             "container": {"background-color": "#BEDFF9", "border-radius": "10px,"},
+                             "icon": {"color": "black"},
+                             "nav-link": {"color": "black", "--hover-color": "#7EBBFB", "border-radius": "5px"},
+                             "nav-link-selected": {"background-color": "#68A8EC", "border-radius": "px"},
+                         })
+    if choice == "Level 3":
+            dummy()
+main()
