@@ -398,21 +398,28 @@ def evaluate_img_creative(img_text, audio_text):
     Image context: {img_text}
     audio Text: {audio_text}
     evaluate the audio text if it is related to the image_context 
-    evaluate the user text with  following criteria:
+     evaluate the user text with  following criteria:
     Clarity of speech,Professionalism,Tone,Grammar,Vocabulary,Fluency,Coherence,Accuracy of audio related to image
-    evaluate the Text only if the user text is related to the image 
+    
+    Evaluate the audio text only if it is clearly related to the image context. The user's speech must accurately describe 
+    or reflect what the image is portraying. If the speech is unrelated, proceed to provide feedback on their communication skills without considering it a valid description of the image.
+    
     The audio text is  must  be the description of what image context  is reflecting
-    evaluation must be in a line by line not in a table formate and in a sperate  line for each criteria
+    evaluation must be in a line by line not in a table formate and in a seperate  line for each criteria
     you have criteria name  in one line and it is explanation in another line and score in another line
     give a short explanation on why they lagging on each and every criteria with the marks for each criteria separately
-    Give a score for overall performance out of 10 use the scores of each and every criteria to calculate and give the score  with explanation make it as Overall Performance
+    Give a score for overall performance out of 10 use the scores of each and every criteria to calculate and give the score  with explanation make it as Overall Performance.
+    Evaluate the score by considering  the number of lines they speak.If user speaks 1-2 lines score should be less.
     provide detailed feedback on how they can improve their communication, reading accuracy, and English-speaking skills.
     give the feedback in two -three lines without confusion
-
+    
     Please provide two separate sections in your evaluation:
     Criteria Evaluation: Provide feedback for each criterion separately (Clarity, Professionalism, etc.), with a score out of 10 and a brief explanation.
     Overall Performance: Summarize the user's overall performance, give an overall score, and provide advice on how they can improve.
+    Note: Evaluate only after the user has finished speaking about the picture. The user should speak about the image atleast 4-5 lines.If the user speaks clearly and meets criteria (such as tone, grammar, etc.) but does not relate to the image context, 
+    score their performance but mention that the speech was not considered a valid description of the image
     """
+
     generation_config = {
         "max_output_tokens": 8192,
         "temperature": 0.7,
@@ -432,20 +439,29 @@ def evaluate_img_creative(img_text, audio_text):
 
 def generate_sentence():
     prompt = """
-    You are a well-trained linguist who is an expert in vocabulary, grammar, and the structure of the English language. 
-    Your task is to generate a list of 5 sentences, all of which contain grammatical errors, incorrect vocabulary usage, or improper tense usage. 
-    Ensure that every sentence contains at least one mistake, and focus on making the errors clear and identifiable so that users can spot and correct them.
-    The mistakes should vary across different aspects of English, such as subject-verb agreement, incorrect use of tenses, wrong word choices, or sentence structure errors.
-    Make sure that the sentences are not too ambiguous, and the errors should be noticeable for someone with intermediate English skills.
-    Avoid overly complex or uncommon words, and keep the sentence structure simple to avoid confusion. 
-    Also, ensure the mistakes are varied across sentences, so each sentence features a different kind of error.
-    Avoid creating sentences that are too artificial; they should still resemble natural English, but with intentional errors that can be corrected.
-    Do not use any string literals, commas, or apostrophes in the sentences. 
-    Do not include spelling mistakes unless the word choice is the main error in the sentence.
-    The sentences should be about common, everyday topics or scenarios, making them relatable and easier for users to understand.
-    ["sentence1","sentence2","sentence3"]
-    The output should be just the list of sentences as above mentioned format.Don't wrap any other text to the output.
-    """
+        You are a well-trained linguist who is an expert in vocabulary, grammar, and the structure of the English language.
+        Your task is to generate a list of 5 sentences, all of which contain grammatical errors, incorrect vocabulary usage, or improper tense usage.
+        In addition, for each incorrect sentence, generate the correct version of the sentence. Ensure that:
+        - Every sentence contains at least one mistake, focusing on grammatical errors, tense, vocabulary misuse, or sentence structure.
+        - Each mistake is clear and identifiable, suitable for intermediate English learners.
+        - The errors are varied across the sentences, such as subject-verb agreement, incorrect tense, or wrong word usage.
+        - The sentences should not contain string literals, commas, or apostrophes.
+        - Spelling mistakes are only allowed if they highlight incorrect word choices.
+        - The sentences should be simple, natural, and about common, everyday topics or scenarios.
+        - The mistakes should be different in each sentence, and not repetitive or ambiguous.
+        **Output Requirements:**
+        - The output should be a list of json which consist incorrect_sentence and respective correct_sentence:
+        [{
+          "incorrect_sentence1": "The incorrect sentence.",
+          "correct_sentence1": "The corrected sentence."
+        },
+        {
+          "incorrect_sentence2": "The incorrect sentence.",
+          "correct_sentence2": "The corrected sentence."
+        }
+        ]
+        - Ensure the output is in the correct format, without any additional text or explanations.
+        """
     generation_config = {
         "max_output_tokens": 8192,
         "temperature": 0.7,
@@ -460,8 +476,8 @@ def generate_sentence():
 
     response = generative_multimodal_model.generate_content(prompt, generation_config=generation_config,
                                                             safety_settings=safety_settings)
-    print(response.text)
-    return response.text
+    print(response.text.replace("```","").replace("json",""))
+    return response.text.replace("```","").replace("json","")
 
 
 def evaluate_sentences(incorrect_sentence, corrected_sentence):
